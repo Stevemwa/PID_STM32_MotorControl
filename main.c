@@ -48,6 +48,7 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+int SetRPM = 55;
 
 //MOTOR A
 #define IN1_PIN GPIO_PIN_7
@@ -67,11 +68,11 @@ volatile int RPMA = 0;
 int Count_Error[Count_BUFFER_SIZE];
 
 //PID MOTOR_A
-float P_GainA = 10;
-float I_GainA = 0.0;
-float D_GainA = 0;
+float P_GainA = 8;
+float I_GainA = 0.014;
+float D_GainA = 4;
 int Prev_ErrorA = 0;
-int SetRPM = 135;
+
 uint32_t IntegralError = 0;
 #define BUFFER_SIZE 5
 int MotorA_Error[BUFFER_SIZE];
@@ -97,7 +98,7 @@ static void MX_TIM4_Init(void);
 void motorA_RUN(int pwm) {
 	int dir = 1;
 	if (pwm < 0) {
-		pwm = 200;
+		pwm = 50;
 		dir = 1;
 	}
 	if (pwm >= 1000) {
@@ -136,6 +137,9 @@ int MovingAvarageFilter(int NewError) {
 		sum += MotorA_Error[i];
 	}
 
+	sprintf(send, " sum:  %d ", sum);
+	HAL_UART_Transmit(&huart1, (uint8_t*) send, strlen(send), 50);
+
 	return sum;
 
 }
@@ -162,9 +166,8 @@ int PID_A(int pwm, int rpma) {
 	int Error = pwm - rpma;
 	float P = Error * P_GainA;
 
-	IntegralError = MovingAvarageFilter(Error);
-	float I = (IntegralError) * I_GainA;
-	float D = (Error - Prev_ErrorA) * D_GainA;
+	float I = (float)(MovingAvarageFilter(Error)) * I_GainA;
+	float D = (float)(Error - Prev_ErrorA) * D_GainA;
 	int PID = (int)P + (int)I + (int)D;
 	Prev_ErrorA = Error;
 
