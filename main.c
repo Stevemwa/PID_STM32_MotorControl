@@ -42,32 +42,44 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-int SetRPM = 100;
-volatile uint32_t CurrentSpeeed =0;
+
+// Buffer for UART data
+char send[20];
+
+//Common to motor A and B
+volatile uint32_t currentMillis = 0;
+volatile uint32_t PrevPID = 0;
+
+#define Count_BUFFER_SIZE 10
+int Count_Error[Count_BUFFER_SIZE];
+//___________________________________________________________________________________________
 
 //MOTOR A
+int SetRPM_A = 75;
+volatile uint32_t PWM_A =0;
+volatile int RPMA = 0;
+
 #define IN1_PIN GPIO_PIN_7
 #define IN1_GPIO GPIOA
 
 #define IN2_PIN GPIO_PIN_6
 #define IN2_GPIO GPIOA
 
-//ENCODER
-volatile uint32_t preViousMillis = 0;
-volatile uint32_t currentMillis = 0;
-volatile uint32_t PrevPID = 0;
-int counterValue, pastCounterValue = 0;
-float angleValue = 0;
+//ENCODER A
+volatile uint32_t preViousMillis_A = 0;
+int counterValue_A, pastCounterValue_A = 0;
+float angleValue_A = 0;
 
-volatile int RPMA = 0;
-#define Count_BUFFER_SIZE 10
-int Count_Error[Count_BUFFER_SIZE];
+
+
+
 
 //PID MOTOR_A
 float P_GainA = 0.1;
@@ -75,12 +87,43 @@ float I_GainA = 0.0;
 float D_GainA = 0;
 int Prev_ErrorA = 0;
 
-uint32_t IntegralError = 0;
+uint32_t IntegralErrorA = 0;
 #define BUFFER_SIZE 5
 int MotorA_Error[BUFFER_SIZE];
 
-// Buffer for UART data
-char send[20];
+
+
+//_____________________________________________________________________________________________________________________
+
+//MOTOR B
+int SetRPM_B = 75;
+volatile uint32_t PWM_B =0;
+volatile int RPMB = 0;
+
+#define IN3_PIN GPIO_PIN_2
+#define IN3_GPIO GPIOB
+
+#define IN4_PIN GPIO_PIN_10
+#define IN4_GPIO GPIOB
+
+
+//ENCODER A
+volatile uint32_t preViousMillis_B = 0;
+int counterValue_B, pastCounterValue_B = 0;
+float angleValue_B = 0;
+
+
+
+//PID MOTOR_B
+float P_GainB = 0.1;
+float I_GainB = 0.0;
+float D_GainB = 0;
+int Prev_ErrorB = 0;
+
+uint32_t IntegralError_B = 0;
+int MotorB_Error[BUFFER_SIZE];
+
+
 
 /* USER CODE END PV */
 
@@ -91,12 +134,14 @@ static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 void motorA_RUN(int pwm) {
 	int dir = 1;
 	if (pwm < 0) {
@@ -125,7 +170,36 @@ void motorA_RUN(int pwm) {
 	}
 
 }
-int MovingAvarageFilter(int NewError) {
+
+void motorB_RUN(int pwm) {
+	int dir = 1;
+	if (pwm < 0) {
+		pwm = 0;
+		dir = 1;
+	}
+	if (pwm >= 255) {
+		pwm = 255;
+	}
+
+	if (dir == 1) {
+		HAL_GPIO_WritePin(IN3_GPIO, IN3_PIN, 0);
+		HAL_GPIO_WritePin(IN4_GPIO, IN4_PIN, 1);
+
+		__HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, pwm);
+
+	} else if (dir == 0) {
+		HAL_GPIO_WritePin(IN3_GPIO, IN3_PIN, 1);
+		HAL_GPIO_WritePin(IN4_GPIO, IN4_PIN, 0);
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm);
+
+	} else {
+		HAL_GPIO_WritePin(IN3_GPIO, IN3_PIN, 0);
+		HAL_GPIO_WritePin(IN4_GPIO, IN4_PIN, 0);
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
+	}
+
+}
+int MovingAvarageFilter_A(int NewError) {
 	// Shift all elements to the right
 	for (int i = (BUFFER_SIZE - 1); i > 0; i--) {
 		MotorA_Error[i] = MotorA_Error[i - 1];
@@ -141,6 +215,24 @@ int MovingAvarageFilter(int NewError) {
 	return sum;
 
 }
+
+int MovingAvarageFilter_B(int NewError) {
+	// Shift all elements to the right
+	for (int i = (BUFFER_SIZE - 1); i > 0; i--) {
+		MotorB_Error[i] = MotorB_Error[i - 1];
+	}
+	// Insert new error at the beginning
+	MotorB_Error[0] = NewError;
+
+	// Calculate the sum of the buffer
+	int sum = 0;
+	for (int i = 0; i < BUFFER_SIZE; i++) {
+		sum += MotorB_Error[i];
+	}
+	return sum;
+
+}
+
 
 int CheckStop(int Counts) {
 	// Shift all elements to the right
@@ -161,9 +253,9 @@ int CheckStop(int Counts) {
 }
 
 int PID_A(int rpma) {
-	int Error = SetRPM- rpma;
+	int Error = SetRPM_A- rpma;
 	float P = ((float)Error) * P_GainA;
-	float I = ((float)(MovingAvarageFilter(Error))) * I_GainA;
+	float I = ((float)(MovingAvarageFilter_A(Error))) * I_GainA;
 	float D = ((float)(Error - Prev_ErrorA)) * D_GainA;
 	int PID = ((int)P) + ((int)I) + ((int)D);
 	Prev_ErrorA = Error;
@@ -171,7 +263,28 @@ int PID_A(int rpma) {
 
 }
 
-float polynomial_inverse(float y) {
+int PID_B(int rpma) {
+	int Error = SetRPM_B- rpma;
+	float P = ((float)Error) * P_GainB;
+	float I = ((float)(MovingAvarageFilter_B(Error))) * I_GainB;
+	float D = ((float)(Error - Prev_ErrorB)) * D_GainB;
+	int PID = ((int)P) + ((int)I) + ((int)D);
+	Prev_ErrorB = Error;
+	return PID;
+
+}
+float polynomial_inverse_A(float y) {
+    // Coefficients of the polynomial
+    float a = -7.151e-05;
+    float b = 0.03861;
+    float c = -2.724;
+    float d = 210.7;
+
+    // Calculate the polynomial value
+    return (a * y * y * y + b * y * y + c * y + d)/3.90625;
+}
+
+float polynomial_inverse_B(float y) {
     // Coefficients of the polynomial
     float a = -7.151e-05;
     float b = 0.03861;
@@ -217,12 +330,28 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); //PB1
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); //PB0
+
+	//START ENCODER MODES
 	HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
-//	motorA_RUN(350);
-	CurrentSpeeed=0;
-	preViousMillis = HAL_GetTick();
+	HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+
+    //LAUNCH MOTORS A AND B
+	PWM_A = polynomial_inverse_A(SetRPM_A);
+	PWM_B = polynomial_inverse_B(SetRPM_B);
+
+	motorA_RUN(PWM_A);
+	motorB_RUN(PWM_B);
+
+	//START TIMING THE MOTORS
+	preViousMillis_A = HAL_GetTick();
+	preViousMillis_B = HAL_GetTick();
+
+
+	//TIME PID CALCULATE INTERVALS
 	PrevPID = HAL_GetTick();
 
 
@@ -233,27 +362,38 @@ int main(void)
 	while (1) {
 
 		currentMillis = HAL_GetTick();
-		counterValue = TIM4->CNT;
+		counterValue_A = TIM4->CNT;
+		counterValue_B = TIM2->CNT;
 
-		if (counterValue >= 200) {
-			int time = currentMillis - preViousMillis;
+		if (counterValue_A >= 200) {
+			int time = currentMillis - preViousMillis_A;
 			float speedy = ((float)60000 / (float)time) * ((float)(TIM4->CNT) / (float)2000);
 			RPMA=(int)speedy;
-			preViousMillis = currentMillis;
+			preViousMillis_A = currentMillis;
 			TIM4->CNT = 0;
 		}
 
+		if (counterValue_B >= 200) {
+			int time = currentMillis - preViousMillis_B;
+			float speedy = ((float)60000 / (float)time) * ((float)(TIM2->CNT) / (float)2000);
+			RPMB=(int)speedy;
+			preViousMillis_B = currentMillis;
+			TIM2->CNT = 0;
+		}
 
 
 		if((currentMillis-PrevPID)>=20){
-			CurrentSpeeed = CurrentSpeeed + PID_A(RPMA);
-			motorA_RUN(CurrentSpeeed);
+			PWM_A= PWM_A + PID_A(RPMA);
+			PWM_B= PWM_B + PID_B(RPMB);
+
+			motorA_RUN(PWM_A);
+			motorB_RUN(PWM_B);
 			PrevPID=currentMillis;
 		}
 
 
 
-		sprintf(send,"%d", CurrentSpeeed);
+		sprintf(send,"PWM_A%d", PWM_A);
 		HAL_UART_Transmit(&huart1,(uint8_t*) send, strlen(send), 50);
 
 
@@ -360,6 +500,55 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 5;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 5;
+  if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief TIM3 Initialization Function
   * @param None
   * @retval None
@@ -408,6 +597,10 @@ static void MX_TIM3_Init(void)
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -519,12 +712,22 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2|GPIO_PIN_10, GPIO_PIN_RESET);
+
   /*Configure GPIO pins : PA6 PA7 */
   GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB2 PB10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
