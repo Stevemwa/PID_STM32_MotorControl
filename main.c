@@ -69,6 +69,8 @@ volatile uint32_t PrevPID = 0;
 int Count_Error[Count_BUFFER_SIZE];
 
 //_________________ODOMETRY_____________________________________
+int DirMutA =1;
+int DirMutB =1;
 volatile float tencountR = 0;
 volatile float tencountL = 0;
 
@@ -162,6 +164,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 	if (DirA == 2) {
 		TIM4->CNT = 2200;
+
 	}
 	if (DirB == 2) {
 		TIM2->CNT = 2200;
@@ -427,11 +430,17 @@ int main(void)
 		}
 
 		if ((tencountR >= 10) || (tencountL >= 10)) {
+
 			NR = NR + (tencountR / 10);
 			NL = NL + (tencountL / 10);
 			tencountL=0;
 			tencountR=0;
 		}
+
+		if(DirA==1){DirMutA=1;}
+		if(DirB==1){DirMutB=1;}
+		if(DirA==2){DirMutA=-1;}
+		if(DirB==2){DirMutB=-1;}
 
 		if ((currentMillis - PrevPID) >= 20 && NewCmd == 0) {
 
@@ -443,7 +452,7 @@ int main(void)
 			PrevPID = currentMillis;
 
 			if (ReadyToSend == 1) {
-				sprintf(send,"%d,%d,%d,%d \n", RPMA, RPMB, (int)NR, (int)NL);
+				sprintf(send,"%d,%d,%d,%d \n", RPMA, RPMB, ((int)NR*DirMutA), ((int)NL*DirMutB));
 				HAL_UART_Transmit_IT(&huart1, (uint8_t*) send, strlen(send));
 				ReadyToSend = 0;
 			}
