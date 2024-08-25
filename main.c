@@ -51,6 +51,9 @@ DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 
+//PID Timer
+int change =0;
+
 // Buffer for UART TX data
 uint16_t TxData[20];
 char send[20];
@@ -68,9 +71,12 @@ volatile uint32_t PrevPID = 0;
 #define Count_BUFFER_SIZE 10
 int Count_Error[Count_BUFFER_SIZE];
 
+//_________________CHECK STOPS_____________________________________
+
+
 //_________________ODOMETRY_____________________________________
-int DirMutA =1;
-int DirMutB =1;
+int DirMutA = 1;
+int DirMutB = 1;
 volatile float tencountR = 0;
 volatile float tencountL = 0;
 
@@ -94,17 +100,19 @@ volatile int RPMA = 0;
 
 //ENCODER A
 volatile uint32_t preViousMillis_A = 0;
+volatile uint32_t PrevChckStop = 0;
+
 int counterValue_A, pastCounterValue_A = 0;
 float angleValue_A = 0;
 
 //PID MOTOR_A
 float P_GainA = 0.1;
-float I_GainA = 0.002;
-float D_GainA = 0.02;
+float I_GainA = 0.01;
+float D_GainA = 0.4;
 int Prev_ErrorA = 0;
 
 uint32_t IntegralErrorA = 0;
-#define BUFFER_SIZE 5
+#define BUFFER_SIZE 10
 int MotorA_Error[BUFFER_SIZE];
 
 //_____________________________________________________________________________________________________________________
@@ -128,8 +136,8 @@ float angleValue_B = 0;
 
 //PID MOTOR_B
 float P_GainB = 0.1;
-float I_GainB = 0.002;
-float D_GainB = 0.02;
+float I_GainB = 0.01;
+float D_GainB = 0.4;
 int Prev_ErrorB = 0;
 
 uint32_t IntegralError_B = 0;
@@ -162,14 +170,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	DirB = (RxData[3] - 48);
 	SetRPM_B = (((RxData[5] - 48) + ((RxData[4] - 48) * 10))) * 2;
 
-	if (DirA == 2) {
-		TIM4->CNT = 2200;
+	TIM4->CNT = 20000;
+	TIM2->CNT = 20000;
 
-	}
-	if (DirB == 2) {
-		TIM2->CNT = 2200;
-	}
+	NR = 0;
+	NL = 0;
+
+
 	NewCmd = 1;
+	change=1;
 
 	for (int i = 0; i < RxBufferSize; i++) {
 		RxData[i] = 0;
@@ -271,30 +280,17 @@ int MovingAvarageFilter_B(int NewError) {
 
 }
 
-int CheckStop(int Counts) {
-	// Shift all elements to the right
-	for (int i = (Count_BUFFER_SIZE - 1); i > 0; i--) {
-		Count_Error[i] = Count_Error[i - 1];
-	}
-	// Insert new error at the beginning
-	Count_Error[0] = Counts;
 
-	// Calculate the sum of the buffer
-	int sum = 0;
-	for (int i = 0; i < Count_BUFFER_SIZE; i++) {
-		sum += Count_Error[i];
-	}
-	int test = (sum / Count_BUFFER_SIZE) / Counts;
-	return test;
 
-}
+
+
 
 int PID_A(int rpma) {
 	int Error = SetRPM_A - rpma;
 	float P = ((float) Error) * P_GainA;
 	float I = ((float) (MovingAvarageFilter_A(Error))) * I_GainA;
 	float D = ((float) (Error - Prev_ErrorA)) * D_GainA;
-	int PID = ((int) P) + ((int) I) + ((int) D);
+	int PID = (int) (P + I + D);
 	Prev_ErrorA = Error;
 	return PID;
 
@@ -305,7 +301,7 @@ int PID_B(int rpma) {
 	float P = ((float) Error) * P_GainB;
 	float I = ((float) (MovingAvarageFilter_B(Error))) * I_GainB;
 	float D = ((float) (Error - Prev_ErrorB)) * D_GainB;
-	int PID = ((int) P) + ((int) I) + ((int) D);
+	int PID = (int) (P + I + D);
 	Prev_ErrorB = Error;
 	return PID;
 
@@ -360,12 +356,20 @@ int main(void)
 	HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
 	HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
 
+	//CHECK STOPS
+	float PrevNR=0;
+	float PrevNL=0;
+
 	//START TIMING THE MOTORS
+
+	TIM4->CNT = 20000;
+	TIM2->CNT = 20000;
 	preViousMillis_A = HAL_GetTick();
 	preViousMillis_B = HAL_GetTick();
 
 	//TIME PID CALCULATE INTERVALS
 	PrevPID = HAL_GetTick();
+	PrevChckStop = HAL_GetTick();
 
   /* USER CODE END 2 */
 
@@ -377,55 +381,74 @@ int main(void)
 		counterValue_A = TIM4->CNT;
 		counterValue_B = TIM2->CNT;
 
-		if (counterValue_A >= 200 && DirA == 1) {
+		if (counterValue_A >= 20200 && DirA == 1) {
 			int time = currentMillis - preViousMillis_A;
 			float speedy = ((float) 60000 / (float) time)
-					* ((float) (TIM4->CNT) / (float) 2000);
+					* ((float)((TIM4->CNT)-20000) / (float) 2000);
 			RPMA = (int) speedy;
 			tencountR = tencountR + 1;
 			preViousMillis_A = currentMillis;
-			TIM4->CNT = 0;
+			TIM4->CNT = 20000;
+			change=1;
 		}
 
-		if (counterValue_B >= 200 && DirB == 1) {
+		if (counterValue_B >= 20200 && DirB == 1) {
 			int time = currentMillis - preViousMillis_B;
 			float speedy = ((float) 60000 / (float) time)
-					* ((float) (TIM2->CNT) / (float) 2000);
+					* ((float)((TIM2->CNT)-20000) / (float) 2000);
 			RPMB = (int) speedy;
 			tencountL = tencountL + 1;
 			preViousMillis_B = currentMillis;
-			TIM2->CNT = 0;
+			TIM2->CNT = 20000;
+			change=1;
 		}
 
-		if (counterValue_A <= 2000 && DirA == 2) {
+		if (counterValue_A <= 19800 && DirA == 2) {
 			int time = currentMillis - preViousMillis_A;
 			float speedy = ((float) 60000 / (float) time)
-					* ((float) (2200 - (TIM4->CNT)) / (float) 2000);
+					* ((float)(20000 - (TIM4->CNT)) / (float) 2000);
 			RPMA = (int) speedy;
 			tencountR = tencountR + 1;
 			preViousMillis_A = currentMillis;
-			TIM4->CNT = 2200;
+			TIM4->CNT = 20000;
+			change=1;
 		}
 
-		if (counterValue_B <= 2000 && DirB == 2) {
+		if (counterValue_B <= 19800 && DirB == 2) {
 			int time = currentMillis - preViousMillis_B;
 			float speedy = ((float) 60000 / (float) time)
-					* ((float) (2200 - (TIM2->CNT)) / (float) 2000);
+					* ((float) (20000 - (TIM2->CNT)) / (float) 2000);
 			RPMB = (int) speedy;
 			tencountL = tencountL + 1;
 			preViousMillis_B = currentMillis;
-			TIM2->CNT = 2200;
+			TIM2->CNT = 20000;
+			change=1;
+		}
+
+		if((currentMillis- PrevChckStop )>500){
+		if(NL==PrevNL&& RPMB>20){
+			RPMB = 0;
+
+		}
+		if(NR==PrevNR&& RPMB>20){
+			RPMA = 0;
+		}
+
+		PrevNL=NL;
+		PrevNR=NR;
+		PrevChckStop=currentMillis;
+
 		}
 
 		if (SetRPM_B == 0) {
 			motorB_RUN(0);
-			TIM2->CNT = 0;
+			TIM2->CNT = 20000;
 			RPMB = 0;
 		}
 
 		if (SetRPM_A == 0) {
 			motorA_RUN(0);
-			TIM4->CNT = 0;
+			TIM4->CNT = 20000;
 			RPMA = 0;
 		}
 
@@ -433,16 +456,26 @@ int main(void)
 
 			NR = NR + (tencountR / 10);
 			NL = NL + (tencountL / 10);
-			tencountL=0;
-			tencountR=0;
+			tencountL = 0;
+			tencountR = 0;
 		}
 
-		if(DirA==1){DirMutA=1;}
-		if(DirB==1){DirMutB=1;}
-		if(DirA==2){DirMutA=-1;}
-		if(DirB==2){DirMutB=-1;}
+		if (DirA == 1) {
+			DirMutA = 1;
+		}
+		if (DirB == 1) {
+			DirMutB = 1;
+		}
+		if (DirA == 2) {
+			DirMutA = -1;
+		}
+		if (DirB == 2) {
+			DirMutB = -1;
+		}
 
-		if ((currentMillis - PrevPID) >= 20 && NewCmd == 0) {
+
+
+		if ((currentMillis - PrevPID) >= 50 && NewCmd == 0&& change==1) {
 
 			PWM_A = PWM_A + PID_A(RPMA);
 			PWM_B = PWM_B + PID_B(RPMB);
@@ -452,10 +485,12 @@ int main(void)
 			PrevPID = currentMillis;
 
 			if (ReadyToSend == 1) {
-				sprintf(send,"%d,%d,%d,%d \n", RPMA, RPMB, ((int)NR*DirMutA), ((int)NL*DirMutB));
+				sprintf(send, "%d,%d,%d,%d \n", RPMA, RPMB,((int) NR * DirMutA), ((int) NL * DirMutB));
 				HAL_UART_Transmit_IT(&huart1, (uint8_t*) send, strlen(send));
 				ReadyToSend = 0;
 			}
+
+
 		}
 
 		if (NewCmd == 1) {
@@ -598,7 +633,7 @@ static void MX_TIM2_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 5;
+  sConfig.IC1Filter = 3;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
@@ -710,11 +745,11 @@ static void MX_TIM4_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 5;
+  sConfig.IC1Filter = 3;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 5;
+  sConfig.IC2Filter = 3;
   if (HAL_TIM_Encoder_Init(&htim4, &sConfig) != HAL_OK)
   {
     Error_Handler();
