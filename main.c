@@ -386,7 +386,7 @@ int main(void)
 			float speedy = ((float) 60000 / (float) time)
 					* ((float)((TIM4->CNT)-20000) / (float) 2000);
 			RPMA = (int) speedy;
-			tencountR = tencountR + 1;
+			NR = NR + 0.1;
 			preViousMillis_A = currentMillis;
 			TIM4->CNT = 20000;
 			change=1;
@@ -397,7 +397,7 @@ int main(void)
 			float speedy = ((float) 60000 / (float) time)
 					* ((float)((TIM2->CNT)-20000) / (float) 2000);
 			RPMB = (int) speedy;
-			tencountL = tencountL + 1;
+			NL = NL + 0.1;
 			preViousMillis_B = currentMillis;
 			TIM2->CNT = 20000;
 			change=1;
@@ -408,7 +408,7 @@ int main(void)
 			float speedy = ((float) 60000 / (float) time)
 					* ((float)(20000 - (TIM4->CNT)) / (float) 2000);
 			RPMA = (int) speedy;
-			tencountR = tencountR + 1;
+			NR = NR + 0.1;
 			preViousMillis_A = currentMillis;
 			TIM4->CNT = 20000;
 			change=1;
@@ -419,7 +419,7 @@ int main(void)
 			float speedy = ((float) 60000 / (float) time)
 					* ((float) (20000 - (TIM2->CNT)) / (float) 2000);
 			RPMB = (int) speedy;
-			tencountL = tencountL + 1;
+			NL = NL + 0.1;
 			preViousMillis_B = currentMillis;
 			TIM2->CNT = 20000;
 			change=1;
@@ -452,13 +452,13 @@ int main(void)
 			RPMA = 0;
 		}
 
-		if ((tencountR >= 10) || (tencountL >= 10)) {
-
-			NR = NR + (tencountR / 10);
-			NL = NL + (tencountL / 10);
-			tencountL = 0;
-			tencountR = 0;
-		}
+//		if ((tencountR >= 10) || (tencountL >= 10)) {
+//
+//			NR = NR + (tencountR / 10);
+//			NL = NL + (tencountL / 10);
+//			tencountL = 0;
+//			tencountR = 0;
+//		}
 
 		if (DirA == 1) {
 			DirMutA = 1;
@@ -484,8 +484,11 @@ int main(void)
 			motorB_RUN(PWM_B);
 			PrevPID = currentMillis;
 
+			int RightTurns=(int)(NR*10);
+			int LeftTurns=(int)(NL*10);
+
 			if (ReadyToSend == 1) {
-				sprintf(send, "%d,%d,%d,%d \n", RPMA, RPMB,((int) NR * DirMutA), ((int) NL * DirMutB));
+				sprintf(send, "%d,%d,%d,%d \n", RPMA, RPMB,(RightTurns * DirMutA), (LeftTurns * DirMutB));
 				HAL_UART_Transmit_IT(&huart1, (uint8_t*) send, strlen(send));
 				ReadyToSend = 0;
 			}
